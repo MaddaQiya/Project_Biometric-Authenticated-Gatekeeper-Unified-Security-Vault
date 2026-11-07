@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+storage/*.db
+storage/*.db-journal
+storage/.master_secret
+storage/files/*
+virtual_usb/
+.geovault_dongle
