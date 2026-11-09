@@ -1,4 +1,4 @@
-# ⚡ BAGUS_OS // TERMINAL v2.6 — GeoVault Spatial & Secret Document Digital Vault
+# ⚡ B.A.G.U.S. (Biometric-Authenticated Gatekeeper & Unified Security) Vault  // TERMINAL v2.6 — GeoVault Spatial & Secret Document Digital Vault
 
 ```text
  ██████╗  █████╗  ██████╗ ██╗   ██╗███████╗      ██████╗ ███████╗    ██╗   ██╗██████╗    ██████╗ 
