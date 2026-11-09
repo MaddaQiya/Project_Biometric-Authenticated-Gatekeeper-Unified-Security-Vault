@@ -140,7 +140,7 @@ def render_auth_screen(dongle: dongle_guard.DongleStatus) -> None:
     st.markdown(
         f"### 🧬 GATE_02 // BIOMETRIC + CRYPTOGRAPHIC NEURAL HANDSHAKE\n"
         f"`DONGLE_ID: {dongle.dongle_id}` · `MOUNT: {dongle.path}` · "
-        f"`OPENCV_HAAR: {'ONLINE' if auth_biometric.OPENCV_AVAILABLE else 'CENTER_CROP_FALLBACK'}`"
+        f"`BIO_EXTRACTOR: PIL-128x128-GRAYSCALE + SHA-256`"
     )
 
     tab_login, tab_register = st.tabs([
@@ -206,16 +206,12 @@ def render_auth_screen(dongle: dongle_guard.DongleStatus) -> None:
             )
             reg_pw = st.text_input("Passkey (min. 8 chars, letters & digits)", type="password", key="reg_pw")
             reg_pw2 = st.text_input("Confirm Passkey", type="password", key="reg_pw2")
-            require_face = st.checkbox(
-                "Enforce strict OpenCV frontal-face detection (disable for fingerprint images)",
-                value=False,
-            )
         with col_r2:
             st.subheader("STEP_B // BIOMETRIC TEMPLATE CAPTURE")
             reg_img = _read_biometric_input("register")
             st.caption(
-                "Extracts a 128-bit perceptual vector (`pHash 64-bit + dHash 64-bit`) and seals it "
-                "inside SQLite using **AES-128-EAX** authenticated encryption."
+                "Normalizes grayscale frame to `128x128` via `PIL`, computes `SHA-256` + 128-bit perceptual "
+                "descriptors, and seals the template inside SQLite using **AES-128-EAX**."
             )
 
         if st.button("✨ ENROLL_OPERATOR // SEAL AES-128-EAX TEMPLATE", type="primary", use_container_width=True):
@@ -225,18 +221,16 @@ def render_auth_screen(dongle: dongle_guard.DongleStatus) -> None:
                 st.warning("Capture or upload a biometric image first.")
             else:
                 img_digest = ui_cyberpunk.sha256_hex(reg_img)
-                with st.spinner("EXTRACTING 128-BIT BIOMETRIC VECTOR & SEALING WITH AES-128-EAX..."):
-                    res = auth_biometric.register_user(reg_user, reg_pw, reg_img, require_face=require_face)
+                with st.spinner("EXTRACTING 128x128 BIOMETRIC VECTOR & SEALING WITH AES-128-EAX..."):
+                    res = auth_biometric.register_user(reg_user, reg_pw, reg_img)
                 if res.success:
                     ui_cyberpunk.log_cli(
                         "BIO_AUTH",
-                        f"Enrolled operator '{res.username}' — template sealed with AES-128-EAX (face={res.face_detected})",
+                        f"Enrolled operator '{res.username}' — 128x128 template sealed with AES-128-EAX",
                         digest=img_digest,
                         level="OK",
                     )
-                    st.success(
-                        f"{res.message} (OpenCV Face ROI: {'DETECTED' if res.face_detected else 'CENTER_CROP'})"
-                    )
+                    st.success(res.message)
                 else:
                     ui_cyberpunk.log_cli(
                         "BIO_AUTH",

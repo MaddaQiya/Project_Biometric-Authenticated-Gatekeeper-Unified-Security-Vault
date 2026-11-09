@@ -50,7 +50,7 @@ flowchart TD
 
 ### 2. Biometric Optical Scanner + Salted `SHA-256` & `AES-128-EAX` Login
 - **Knowledge Factor**: Passwords are salted with 16 CSPRNG bytes and stretched through **PBKDF2-HMAC-SHA256** ($600{,}000$ iterations), then combined with a server-side pepper via **HKDF-SHA256** to derive two cryptographically independent outputs: a 256-bit `auth/verifier` and a 128-bit `auth/biometric-key`.
-- **Inherence Factor**: Captures live optical frames via `st.camera_input` (or high-resolution fallback images), isolates the facial region of interest using OpenCV Haar cascades (`haarcascade_frontalface_default.xml`), normalizes illumination via histogram equalization, and extracts a 128-bit perceptual feature vector (`64-bit DCT pHash || 64-bit gradient dHash`) paired with its `SHA-256` digest.
+- **Inherence Factor**: Captures live optical frames via `st.camera_input` (or high-resolution fallback images), decodes via `PIL.Image`, normalizes to a fixed `128x128` 8-bit grayscale matrix with histogram equalization, and computes a `hashlib.sha256` cryptographic pixel digest alongside a 128-bit structural/gradient perceptual vector (`64-bit block hash || 64-bit dHash`).
 - **Template Protection**: Biometric templates are sealed with **AES-128-EAX** authenticated encryption using `auth/biometric-key` (never stored in the database) and bound to the operator username via Associated Data (AAD). Authentication requires constant-time verifier matching and a normalized Hamming similarity $\ge 80\%$.
 
 ### 3. Super Encryption Engine (`Vigenère Cipher` + `AES-256-CBC`)
@@ -95,7 +95,7 @@ geovault-crypto-app/
 ├── modules/
 │   ├── __init__.py
 │   ├── dongle_guard.py      # USB volume scanner, HMAC-SHA256 token signer & volume serial lock
-│   ├── auth_biometric.py    # PBKDF2-SHA256 KDF, OpenCV/Pillow pHash+dHash & AES-128-EAX cipher
+│   ├── auth_biometric.py    # PBKDF2-SHA256 KDF, PIL 128x128 SHA-256 template & AES-128-EAX cipher
 │   ├── blockchain.py        # SHA-256 PoW ledger, AES-256-GCM metadata & tamper auditor
 │   ├── super_encryption.py  # Cascade Vigenère + AES-256-CBC text encryption engine
 │   ├── file_crypto.py       # ChaCha20 binary stream encryption & SHA-256 integrity verifier
@@ -114,10 +114,8 @@ geovault-crypto-app/
 - **Packages** (`requirements.txt`):
   - `streamlit>=1.38.0`
   - `pycryptodome>=3.20.0`
-  - `opencv-python-headless>=4.9.0`
   - `pillow>=10.0.0`
   - `psutil>=5.9.0`
-  - `numpy>=1.26.0`
 
 ---
 
