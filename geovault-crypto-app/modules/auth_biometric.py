@@ -1,6 +1,6 @@
 """
-GeoVault - Biometric + Cryptographic Two-Factor Login     [DEVELOPER 1]
-========================================================================
+GeoVault - Biometric + Cryptographic Two-Factor Login
+=====================================================
 
 Factor 1 - Knowledge (password)
 -------------------------------

@@ -15,8 +15,8 @@ Design rules
 Tables
 ------
 ``users``               PBKDF2 verifier + salt, AES-128-EAX biometric template
-``secret_messages``     Vigenère + AES-256-CBC super-encrypted tokens   (Dev 2)
-``encrypted_files``     ChaCha20 file metadata (ciphertext lives on disk) (Dev 2)
+``secret_messages``     Vigenère + AES-256-CBC super-encrypted tokens
+``encrypted_files``     ChaCha20 file metadata (ciphertext lives on disk)
 ``blockchain_ledger``   PoW blocks with AES-GCM encrypted asset metadata
 ``app_meta``            Key/value store (e.g. the HMAC-signed ledger tip anchor)
 """
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS secret_messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     owner       TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
     title       TEXT NOT NULL,
-    ciphertext  TEXT NOT NULL,                     -- super-encrypted token (Dev 2 format)
+    ciphertext  TEXT NOT NULL,                     -- super-encrypted token (Vigenere + AES-256-CBC)
     algorithm   TEXT NOT NULL,
     created_at  TEXT NOT NULL
 );
@@ -217,7 +217,7 @@ def record_login_success(username: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# secret_messages  (ciphertext produced by modules.super_encryption - Dev 2)
+# secret_messages  (ciphertext produced by modules.super_encryption)
 # --------------------------------------------------------------------------- #
 def insert_secret_message(owner: str, title: str, ciphertext: str, algorithm: str) -> int:
     return _execute(
@@ -239,7 +239,7 @@ def delete_secret_message(message_id: int, owner: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# encrypted_files  (ciphertext produced by modules.file_crypto - Dev 2)
+# encrypted_files  (ciphertext produced by modules.file_crypto)
 # --------------------------------------------------------------------------- #
 def insert_encrypted_file(
     owner: str,

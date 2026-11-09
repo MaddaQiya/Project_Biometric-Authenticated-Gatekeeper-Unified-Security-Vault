@@ -1,6 +1,6 @@
 """
-GeoVault - USB / Local Dongle Provisioning Utility          [DEVELOPER 1]
-=========================================================================
+GeoVault - USB / Local Dongle Provisioning Utility
+==================================================
 
 Can be used either as a **CLI script** OR as a **Streamlit UI**:
 

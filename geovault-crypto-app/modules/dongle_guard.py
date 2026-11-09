@@ -1,6 +1,6 @@
 """
-GeoVault - Hardware / USB Dongle Guard              [DEVELOPER 1]
-==================================================================
+GeoVault - Hardware / USB Dongle Guard
+======================================
 
 The application stays locked until a *valid* dongle token is found on a
 mounted removable drive (or on a configured fallback path for testing).
@@ -11,7 +11,7 @@ Dongle token format  (``.geovault_dongle`` - UTF-8 JSON, hidden file)
   "version": 1,
   "product": "GeoVault",
   "dongle_id": "<uuid4 hex>",
-  "label": "Maddi's USB key",
+  "label": "Operator Hardware Key",
   "issued_at": "2026-11-07T14:00:00+00:00",
   "expires_at": null | "<ISO-8601>",
   "volume_serial": null | "1A2B3C4D",      # Windows volume binding (anti-cloning)

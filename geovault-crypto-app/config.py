@@ -2,9 +2,9 @@
 GeoVault - Central configuration & key hierarchy
 ================================================
 
-This module is the *single source of truth* for filesystem paths and for the
-application's key hierarchy. Both developers should import keys from here
-instead of hard-coding secrets inside their own modules.
+This module is the single source of truth for filesystem paths and for the
+application's key hierarchy. All cryptographic subsystems derive domain-separated
+sub-keys from here rather than embedding static secrets in individual modules.
 
 Key hierarchy
 -------------
@@ -37,7 +37,7 @@ from Crypto.Protocol.KDF import HKDF
 BASE_DIR: Path = Path(__file__).resolve().parent
 STORAGE_DIR: Path = Path(os.environ.get("GEOVAULT_STORAGE_DIR", BASE_DIR / "storage"))
 DB_PATH: Path = STORAGE_DIR / "geovault.db"
-FILES_DIR: Path = STORAGE_DIR / "files"  # ChaCha20 ciphertext blobs (Dev 2)
+FILES_DIR: Path = STORAGE_DIR / "files"  # ChaCha20 encrypted document blobs
 MASTER_SECRET_FILE: Path = STORAGE_DIR / ".master_secret"
 
 # --------------------------------------------------------------------------- #

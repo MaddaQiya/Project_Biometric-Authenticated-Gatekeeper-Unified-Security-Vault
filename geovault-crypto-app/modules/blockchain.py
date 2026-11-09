@@ -1,6 +1,6 @@
 """
-GeoVault - Local Blockchain Ledger for Critical Assets      [DEVELOPER 1]
-==========================================================================
+GeoVault - Local Blockchain Ledger for Critical Assets
+======================================================
 
 Each critical asset (secret coordinates, certificates, high-value records)
 is recorded as an immutable block in the ``blockchain_ledger`` SQLite table.
