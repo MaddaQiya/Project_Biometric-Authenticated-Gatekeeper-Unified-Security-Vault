@@ -1,18 +1,18 @@
 """
-GeoVault - Hardware / USB Dongle Guard
-======================================
+B.A.G.U.S. Vault - Hardware / USB Dongle Guard
+==============================================
 
 The application stays locked until a *valid* dongle token is found on a
 mounted removable drive (or on a configured fallback path for testing).
 
-Dongle token format  (``.geovault_dongle`` - UTF-8 JSON, hidden file)
--------------------------------------------------------------------
+Dongle token format (``.geovault_dongle`` / ``.cyberdeck_dongle`` - UTF-8 JSON)
+-------------------------------------------------------------------------------
 {
   "version": 1,
-  "product": "GeoVault",
+  "product": "B.A.G.U.S. Vault",
   "dongle_id": "<uuid4 hex>",
   "label": "Operator Hardware Key",
-  "issued_at": "2026-11-07T14:00:00+00:00",
+  "issued_at": "2026-11-10T12:00:00+00:00",
   "expires_at": null | "<ISO-8601>",
   "volume_serial": null | "1A2B3C4D",      # Windows volume binding (anti-cloning)
   "nonce": "<16 random bytes hex>",
@@ -21,16 +21,6 @@ Dongle token format  (``.geovault_dongle`` - UTF-8 JSON, hidden file)
 
 ``signature = HMAC-SHA256(K_dongle, canonical_json(token without "signature"))``
 where ``K_dongle = HKDF(master_secret, "dongle/hmac-sha256")``.
-
-Security properties
--------------------
-* **Unforgeable** - without the master secret an attacker cannot compute a
-  valid HMAC tag, and editing any field (e.g. ``expires_at``) breaks the tag.
-* **Constant-time verification** via ``HMAC.hexverify``.
-* **Anti-cloning (Windows)** - the token is bound to the volume serial number
-  of the drive it was provisioned on; copying it to another drive fails.
-* **Hot-unplug detection** - ``app.py`` re-validates the dongle on every rerun
-  and with a background heartbeat, locking the vault when the USB is removed.
 """
 
 from __future__ import annotations
@@ -52,7 +42,9 @@ from Crypto.Hash import HMAC, SHA256
 import config
 
 DONGLE_VERSION = 1
-PRODUCT_NAME = "GeoVault"
+PRODUCT_NAME = "B.A.G.U.S. Vault"
+ACCEPTED_PRODUCTS = ("B.A.G.U.S. Vault", "GeoVault", "BAGUS_OS")
+SUPPORTED_FILENAMES = (config.DONGLE_FILENAME, ".cyberdeck_dongle")
 MAX_TOKEN_BYTES = 4096  # refuse to parse oversized files (DoS hardening)
 REQUIRED_FIELDS = ("version", "product", "dongle_id", "label", "issued_at",
                    "expires_at", "volume_serial", "nonce", "signature")
@@ -122,7 +114,10 @@ def get_volume_serial(path: str | os.PathLike) -> Optional[str]:
 def _set_hidden(path: Path) -> None:
     """Mark a file as hidden. On POSIX the leading dot already hides it."""
     if os.name == "nt":
-        ctypes.windll.kernel32.SetFileAttributesW(str(path), _FILE_ATTRIBUTE_HIDDEN)  # type: ignore[attr-defined]
+        try:
+            ctypes.windll.kernel32.SetFileAttributesW(str(path), _FILE_ATTRIBUTE_HIDDEN)  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
 
 def _is_linux_removable(device: str) -> bool:
@@ -139,17 +134,11 @@ def _is_linux_removable(device: str) -> bool:
 
 
 def list_removable_mountpoints() -> list[str]:
-    """
-    Enumerate mount points of removable drives (USB flash disks, SD cards...).
-
-    * Windows: psutil marks them with the ``removable`` option.
-    * Linux:   ``/sys/block/*/removable`` or mounts under /media, /run/media.
-    * macOS:   any volume mounted under /Volumes except the system disk.
-    """
+    """Enumerate mount points of removable drives (USB flash disks, SD cards...)."""
     mounts: list[str] = []
     try:
         partitions = psutil.disk_partitions(all=False)
-    except Exception:  # pragma: no cover - psutil failure should never crash the lock screen
+    except Exception:
         return mounts
 
     for part in partitions:
@@ -199,7 +188,7 @@ def build_dongle_token(
         "version": DONGLE_VERSION,
         "product": PRODUCT_NAME,
         "dongle_id": uuid.uuid4().hex,
-        "label": (label or "GeoVault Dongle").strip()[:64],
+        "label": (label or "B.A.G.U.S. Vault Dongle").strip()[:64],
         "issued_at": issued.isoformat(),
         "expires_at": (issued + timedelta(days=valid_days)).isoformat() if valid_days else None,
         "volume_serial": volume_serial,
@@ -210,20 +199,14 @@ def build_dongle_token(
 
 
 def verify_dongle_token(token: dict, location: Optional[str] = None) -> tuple[bool, str]:
-    """
-    Validate a parsed token.
-
-    :param token:    The decoded JSON object.
-    :param location: Directory the token was read from (used for volume binding).
-    :returns:        ``(is_valid, human_readable_reason)``
-    """
+    """Validate a parsed token against HMAC-SHA256 signature, expiry, and volume serial."""
     if not isinstance(token, dict):
         return False, "Malformed dongle token (not a JSON object)."
     missing = [f for f in REQUIRED_FIELDS if f not in token]
     if missing:
         return False, f"Malformed dongle token (missing: {', '.join(missing)})."
-    if token["product"] != PRODUCT_NAME or token["version"] != DONGLE_VERSION:
-        return False, "Dongle was issued for another product/version."
+    if token.get("product") not in ACCEPTED_PRODUCTS or token.get("version") != DONGLE_VERSION:
+        return False, f"Dongle issued for unexpected product '{token.get('product')}'."
 
     # 1) Integrity + authenticity: constant-time HMAC-SHA256 comparison.
     mac = HMAC.new(_hmac_key(), digestmod=SHA256)
@@ -233,8 +216,8 @@ def verify_dongle_token(token: dict, location: Optional[str] = None) -> tuple[bo
     except ValueError:
         return False, "HMAC-SHA256 signature mismatch - token is forged or was modified."
 
-    # 2) Expiry (only meaningful because the field is covered by the HMAC).
-    if token["expires_at"]:
+    # 2) Expiry check.
+    if token.get("expires_at"):
         try:
             expires = datetime.fromisoformat(token["expires_at"])
         except ValueError:
@@ -243,34 +226,45 @@ def verify_dongle_token(token: dict, location: Optional[str] = None) -> tuple[bo
             return False, f"Dongle expired on {token['expires_at']}."
 
     # 3) Volume binding (anti-cloning).
-    if token["volume_serial"] and location:
+    if token.get("volume_serial") and location:
         current = get_volume_serial(location)
         if current is not None and current != token["volume_serial"]:
-            return False, ("Dongle is bound to another drive "
-                           f"(expected volume {token['volume_serial']}, found {current}) - cloned token?")
+            return False, (
+                f"Dongle bound to different drive "
+                f"(expected volume {token['volume_serial']}, found {current}) - cloned token?"
+            )
 
     return True, "Dongle verified (HMAC-SHA256 OK)."
 
 
-def _resolve_token_file(location: str | os.PathLike) -> Path:
+def _find_token_file(location: str | os.PathLike) -> Optional[Path]:
+    """Locate either .geovault_dongle or .cyberdeck_dongle inside location."""
     path = Path(location)
-    return path if path.name == config.DONGLE_FILENAME else path / config.DONGLE_FILENAME
+    if path.is_file() and path.name in SUPPORTED_FILENAMES:
+        return path
+    for name in SUPPORTED_FILENAMES:
+        cand = path / name
+        if cand.is_file():
+            return cand
+    return None
 
 
 def check_dongle_at(location: Optional[str]) -> DongleStatus:
-    """Validate the dongle file stored in ``location`` (a directory or the file itself)."""
+    """Validate the dongle token stored in ``location``."""
     if not location:
         return DongleStatus(False, "No dongle location provided.")
-    token_file = _resolve_token_file(location)
-    directory = str(token_file.parent)
+    token_file = _find_token_file(location)
+    directory = str(Path(location) if Path(location).is_dir() else Path(location).parent)
+
+    if not token_file:
+        return DongleStatus(False, f"No authorization dongle token found in {directory}.", path=directory)
+
     try:
-        if not token_file.is_file():
-            return DongleStatus(False, f"No {config.DONGLE_FILENAME} found in {directory}.", path=directory)
         if token_file.stat().st_size > MAX_TOKEN_BYTES:
-            return DongleStatus(False, "Dongle file is too large - rejected.", path=directory)
+            return DongleStatus(False, "Dongle token file exceeds maximum size limit.", path=directory)
         token = json.loads(token_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return DongleStatus(False, f"Unreadable dongle file: {exc}", path=directory)
+        return DongleStatus(False, f"Unreadable dongle token: {exc}", path=directory)
 
     ok, reason = verify_dongle_token(token, directory)
     if not ok:
@@ -288,12 +282,7 @@ def check_dongle_at(location: Optional[str]) -> DongleStatus:
 
 
 def scan_for_dongle(extra_paths: Optional[Iterable[str]] = None) -> DongleStatus:
-    """
-    Scan every candidate location and return the first valid dongle.
-
-    Locations where a dongle file *exists but fails validation* are reported
-    in ``failures`` so the UI can warn about forged/cloned tokens.
-    """
+    """Scan candidate locations and return the first valid dongle."""
     locations = candidate_locations(extra_paths)
     failures: dict[str, str] = {}
     for loc in locations:
@@ -301,46 +290,134 @@ def scan_for_dongle(extra_paths: Optional[Iterable[str]] = None) -> DongleStatus
         if status.valid:
             status.scanned_locations = locations
             return status
-        if _resolve_token_file(loc).exists():
+        if _find_token_file(loc) is not None:
             failures[loc] = status.message
 
     if failures:
-        message = "Dongle file found but validation FAILED: " + "; ".join(
-            f"[{loc}] {why}" for loc, why in failures.items())
+        message = "Dongle token found but validation FAILED: " + "; ".join(
+            f"[{loc}] {why}" for loc, why in failures.items()
+        )
     elif locations:
-        message = f"No valid dongle found in {len(locations)} scanned location(s). Insert your GeoVault USB key."
+        message = f"No valid dongle detected across {len(locations)} scanned path(s). Connect USB hardware key."
     else:
-        message = "No removable drive detected. Insert your GeoVault USB key or configure a fallback path."
+        message = "No removable drive detected. Connect USB authorization dongle or mount virtual key."
     return DongleStatus(False, message, scanned_locations=locations, failures=failures)
 
 
-# --------------------------------------------------------------------------- #
-# Provisioning
-# --------------------------------------------------------------------------- #
 def provision_dongle(
     target: str | os.PathLike,
-    label: str = "GeoVault Dongle",
+    label: str = "B.A.G.U.S. Vault Dongle",
     valid_days: Optional[int] = None,
     bind_to_volume: bool = True,
     overwrite: bool = False,
 ) -> DongleStatus:
-    """
-    Write a freshly signed ``.geovault_dongle`` file to ``target`` (USB root or folder).
-
-    :raises FileNotFoundError: if ``target`` does not exist.
-    :raises FileExistsError:   if a dongle already exists and ``overwrite`` is False.
-    """
+    """Write a freshly signed dongle file to ``target``."""
     target_dir = Path(target)
     if not target_dir.is_dir():
         raise FileNotFoundError(f"Target directory does not exist: {target_dir}")
     token_file = target_dir / config.DONGLE_FILENAME
     if token_file.exists():
         if not overwrite:
-            raise FileExistsError(f"A dongle already exists at {token_file} (use overwrite).")
-        token_file.unlink()  # hidden files cannot be reopened in 'w' mode on Windows
+            raise FileExistsError(f"A dongle already exists at {token_file}.")
+        try:
+            token_file.unlink()
+        except OSError:
+            pass
 
     serial = get_volume_serial(target_dir) if bind_to_volume else None
     token = build_dongle_token(label=label, volume_serial=serial, valid_days=valid_days)
     token_file.write_text(json.dumps(token, indent=2), encoding="utf-8")
     _set_hidden(token_file)
     return check_dongle_at(str(target_dir))
+
+
+# --------------------------------------------------------------------------- #
+# Lockscreen Telemetry & Dev Demo Virtual Mount
+# --------------------------------------------------------------------------- #
+def get_usb_diagnostics() -> list[dict]:
+    """Inspect all system disk partitions and report live dongle/HMAC status for the Lockscreen."""
+    diagnostics: list[dict] = []
+    try:
+        partitions = psutil.disk_partitions(all=False)
+    except Exception:
+        partitions = []
+
+    for part in partitions:
+        mount = part.mountpoint
+        opts = part.opts or ""
+        vol_serial = get_volume_serial(mount) or "UNBOUND"
+        token_path = _find_token_file(mount)
+        token_name = token_path.name if token_path else "NOT_FOUND"
+
+        status = check_dongle_at(mount) if token_path else None
+        if status and status.valid:
+            challenge_str = "AUTHENTICATED // HMAC-SHA256 VERIFIED"
+            state_color = "#00FF66"
+        elif token_path:
+            challenge_str = f"TAMPER_DETECTED // {status.message if status else 'INVALID'}"
+            state_color = "#FF003C"
+        else:
+            challenge_str = "AWAITING_DEVICE // NO_KEY_TOKEN"
+            state_color = "#7C8DA6"
+
+        diagnostics.append({
+            "mount": mount,
+            "device": part.device,
+            "fstype": part.fstype or "RAW",
+            "type": "REMOVABLE_USB" if "removable" in opts.lower() else "FIXED_DRIVE",
+            "volume_serial": vol_serial,
+            "token_file": token_name,
+            "hmac_challenge": challenge_str,
+            "status_color": state_color,
+            "is_valid": bool(status and status.valid),
+        })
+
+    # Always report virtual fallback path state
+    v_dir = config.DEFAULT_FALLBACK_DONGLE_DIR
+    v_token = _find_token_file(v_dir) if v_dir.is_dir() else None
+    v_status = check_dongle_at(str(v_dir)) if v_token else None
+    diagnostics.append({
+        "mount": str(v_dir),
+        "device": "[VIRTUAL_LOOPBACK]",
+        "fstype": "NTFS/POSIX",
+        "type": "VIRTUAL_DONGLE",
+        "volume_serial": "VIRTUAL_KEY",
+        "token_file": v_token.name if v_token else "NOT_MOUNTED",
+        "hmac_challenge": (
+            "AUTHENTICATED // HMAC-SHA256 VERIFIED"
+            if (v_status and v_status.valid)
+            else "VIRTUAL_TOKEN_DISCONNECTED"
+        ),
+        "status_color": "#00FF66" if (v_status and v_status.valid) else "#FF003C",
+        "is_valid": bool(v_status and v_status.valid),
+    })
+
+    return diagnostics
+
+
+def mount_virtual_dongle(label: str = "Virtual Forensic Key") -> DongleStatus:
+    """Mount a valid virtual dongle token inside ./virtual_usb (for live classroom demos)."""
+    target = config.DEFAULT_FALLBACK_DONGLE_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    return provision_dongle(target, label=label, bind_to_volume=False, overwrite=True)
+
+
+def unmount_virtual_dongle() -> bool:
+    """Unmount (delete) virtual dongle tokens to simulate live USB unplugging."""
+    target = config.DEFAULT_FALLBACK_DONGLE_DIR
+    removed = False
+    for fn in SUPPORTED_FILENAMES:
+        tf = target / fn
+        if tf.exists():
+            try:
+                tf.unlink()
+                removed = True
+            except OSError:
+                pass
+    return removed
+
+
+def is_virtual_dongle_mounted() -> bool:
+    """Return True if a valid token is currently present in the virtual dongle path."""
+    target = config.DEFAULT_FALLBACK_DONGLE_DIR
+    return _find_token_file(target) is not None

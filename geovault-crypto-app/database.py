@@ -391,3 +391,35 @@ def get_user_stats(owner: str) -> dict[str, Any]:
         "encrypted_bytes": int(files["total"]) if files else 0,
         "ledger_blocks": count_blocks(),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Raw Ciphertext Database Inspection (Forensic Audit)
+# --------------------------------------------------------------------------- #
+def get_raw_records_for_inspection(owner: str) -> dict[str, list[dict]]:
+    """Retrieve raw at-rest rows demonstrating encryption at rest in SQLite."""
+    users_raw = _fetchall(
+        "SELECT id, username, password_hash, password_salt, kdf_iterations, "
+        "hex(bio_template) AS bio_template_hex, bio_algorithm, created_at FROM users WHERE username = ?",
+        (owner,),
+    )
+    messages_raw = _fetchall(
+        "SELECT id, title, ciphertext, algorithm, created_at FROM secret_messages WHERE owner = ? ORDER BY id DESC",
+        (owner,),
+    )
+    files_raw = _fetchall(
+        "SELECT id, original_name, stored_name, size_bytes, sha256_plain, kdf_salt, nonce, algorithm, created_at "
+        "FROM encrypted_files WHERE owner = ? ORDER BY id DESC",
+        (owner,),
+    )
+    blocks_raw = _fetchall(
+        "SELECT block_index, timestamp, asset_name, encrypted_asset_metadata, previous_hash, nonce, current_hash "
+        "FROM blockchain_ledger ORDER BY block_index ASC"
+    )
+    return {
+        "users": users_raw,
+        "secret_messages": messages_raw,
+        "encrypted_files": files_raw,
+        "blockchain_ledger": blocks_raw,
+    }
+
